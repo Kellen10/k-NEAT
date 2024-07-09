@@ -114,6 +114,31 @@ def global_coverage(environment, k):
     
     return total_coverage
 
+def input_coverage(environment, sensor, k):
+    local_coverage = 0
+    global_coverage = 0
+    closest_distance = float('inf')
+    closest_point = (0, 0)
+
+    for row in range(environment.height):
+        for col in range(environment.width):
+            if environment.grid[row][col] >= k:
+                global_coverage += k
+                if sensor.is_point_covered(col, row):
+                    local_coverage += k
+            else:
+                point_coverage = environment.grid[row][col]
+                global_coverage += point_coverage
+                if sensor.is_point_covered(col, row):
+                    local_coverage += point_coverage
+
+                distance = math.sqrt((row - sensor.y)**2) + math.sqrt((col - sensor.x)**2)
+                if distance < closest_distance:
+                    closest_distance = distance
+                    closest_point = (col, row)
+                
+    return (local_coverage, global_coverage, closest_point)
+
 
 def find_closest_uncovered_point(sensor, environment, k):
     closest_distance = float('inf')
@@ -210,9 +235,10 @@ def eval_genomes(genomes, config):
             # do changes to current environment
             for sensor in new_environment.sensor_list:
                 closest_uncovered_point = find_closest_uncovered_point(sensor, environment, k)
+                coverage_inputs = input_coverage(environment, sensor, k)
                 #inputs = (existing_coverage_in_sensing_range(new_environment, sensor), closest_com_neighbor(new_environment, sensor))
-                inputs = (sensor.x, sensor.y, local_coverage(environment, sensor, k), global_coverage(environment, k), 
-                            closest_uncovered_point[0], closest_uncovered_point[1], num_com_neighbors(environment, sensor))
+                inputs = (sensor.x, sensor.y, coverage_inputs[0], coverage_inputs[1], 
+                            coverage_inputs[2][0], coverage_inputs[2][1], num_com_neighbors(environment, sensor))
                 outputs = net.activate(inputs)
                 control_sensor(sensor, outputs)
 
