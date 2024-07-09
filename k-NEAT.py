@@ -102,6 +102,32 @@ def local_coverage(environment, sensor, k):
 
     return total_coverage
 
+def local_coverage2(environment, sensor, k):
+    total_coverage = 0
+    closest_distance = float('inf')
+    lowest_coverage = float('inf')
+    lowest_coverage_point = (0,0)
+    closest_point = (0, 0)
+
+    for i in range(int(max(0, sensor.y - sensor.sensing_range)), int(min(environment.height, sensor.y + sensor.sensing_range))):
+            for j in range(int(max(0, sensor.x - sensor.sensing_range)), int(min(environment.width, sensor.x + sensor.sensing_range))):
+                if sensor.is_point_covered(j, i):
+                    if environment.grid[i][j] >= k:
+                        total_coverage += k
+                    else:
+                        if environment.grid[i][j] < lowest_coverage:
+                            lowest_coverage = environment.grid[i][j]
+                            closest_point = (j, i)
+
+                        total_coverage += environment.grid[i][j]
+
+    # if no lowest coverage point 
+    if lowest_coverage_point == (0,0):
+        return (total_coverage, sensor.x, sensor.y)
+    else:
+        return (total_coverage, lowest_coverage_point[0], lowest_coverage_point[1])
+    
+
 def global_coverage(environment, k):
     total_coverage = 0
 
@@ -148,7 +174,6 @@ def find_closest_uncovered_point(sensor, environment, k):
         for x in range(environment.width):
             if environment.grid[y][x] < k:
                 distance = math.sqrt((y - sensor.y)**2) + math.sqrt((x - sensor.x)**2)
-                # Update closest point if this one is closer
                 if distance < closest_distance:
                     closest_distance = distance
                     closest_point = (x, y)
@@ -179,6 +204,56 @@ def num_com_neighbors(environment, sensor):
                 total_com_neighbors += 1
     
     return total_com_neighbors
+
+
+def calculate_connectivity_score(sensors, com_range):
+    num_active_sensors = 0
+    active_sensors = []
+
+    for sensor in sensors:
+        if sensor.active:
+            active_sensors.append(sensor)
+            num_active_sensors += 1
+    
+    if num_active_sensors == 0:
+        return 0
+    
+    # build graph
+    graph = {sensor: [] for sensor in active_sensors}
+    
+    for i in range(num_active_sensors):
+        for j in range(i + 1, num_active_sensors):
+            sensor = active_sensors[i]
+            other_sensor = active_sensors[j]
+            # find distance between two sensors
+            distance = math.sqrt((sensor.x - other_sensor.x)**2 + (sensor.y - other_sensor.y)**2)
+            # if in eachothers communication range connect them
+            if distance <= com_range:
+                graph[sensor].append(other_sensor)
+                graph[other_sensor].append(sensor)
+    
+    # intialize graph
+    visited = {sensor: False for sensor in active_sensors}
+    
+    # dfs
+    def dfs(sensor):
+        stack = [sensor]
+        while stack:
+            current = stack.pop()
+            if not visited[current]:
+                visited[current] = True
+                for neighbor in graph[current]:
+                    if not visited[neighbor]:
+                        stack.append(neighbor)
+    
+    # run DFS 
+    dfs(active_sensors[0])
+    
+    connected_sensors = sum(1 for sensor in active_sensors if visited[sensor])
+    #connectivity_score = connected_sensors / num_active_sensors
+    
+    return connected_sensors
+
 
 
 def eval_genomes(genomes, config):
@@ -234,11 +309,14 @@ def eval_genomes(genomes, config):
 
             # do changes to current environment
             for sensor in new_environment.sensor_list:
-                closest_uncovered_point = find_closest_uncovered_point(sensor, environment, k)
-                coverage_inputs = input_coverage(environment, sensor, k)
-                #inputs = (existing_coverage_in_sensing_range(new_environment, sensor), closest_com_neighbor(new_environment, sensor))
-                inputs = (sensor.x, sensor.y, coverage_inputs[0], coverage_inputs[1], 
-                            coverage_inputs[2][0], coverage_inputs[2][1], num_com_neighbors(environment, sensor))
+                #closest_uncovered_point = find_closest_uncovered_point(sensor, environment, k)
+                # coverage_inputs = input_coverage(environment, sensor, k)
+                # inputs = (sensor.x, sensor.y, coverage_inputs[0], coverage_inputs[1], 
+                #             coverage_inputs[2][0], coverage_inputs[2][1], num_com_neighbors(environment, sensor))
+                
+                # inputs = (sensor.x, sensor.y, local_coverage(environment, sensor, k), num_com_neighbors(environment, sensor))
+                coverage_input = local_coverage2(environment, sensor, k)
+                inputs = (sensor.x, sensor.y, coverage_input[0], coverage_input[1], coverage_input[2], num_com_neighbors(environment, sensor))
                 outputs = net.activate(inputs)
                 control_sensor(sensor, outputs)
 
@@ -258,8 +336,40 @@ def eval_genomes(genomes, config):
         BEST_SCENARIO = current_best_scenario
 
 
-
 def calculate_fitness(sensors, environment, desired_coverage):
+
+    # active_sensors = sum(1 for sensor in sensors if sensor.active)
+    # total_coverage = sum(min(desired_coverage, environment.grid[row][col]) for row in range(environment.height) for col in range(environment.width))
+    # k_covered_points = sum(1 for row in range(environment.height) for col in range(environment.width) if environment.grid[row][col] >= desired_coverage)
+
+    k_covered_points = 0
+    active_sensors = 0
+    total_coverage = 0
+
+    # calculate total k-coverage
+    for row in range(environment.height):
+        for col in range(environment.width):
+            #if environment.grid[row][col] >= desired_coverage:
+                #k_covered_points += 1
+            if environment.grid[row][col] >= desired_coverage:
+                k_covered_points += 1
+                total_coverage += desired_coverage
+            else:
+                total_coverage += environment.grid[row][col]
+    
+    connectivity_score = calculate_connectivity_score(sensors, sensors[0].com_range)
+
+    # Prioritize based on weights
+    fitness_score = (
+        connectivity_score * 1000 +
+        k_covered_points * 100 +
+        total_coverage * 10 -
+        active_sensors * 1
+    )
+    print(connectivity_score, k_covered_points, total_coverage, active_sensors, fitness_score)
+    return fitness_score
+
+def calculate_fitness_old(sensors, environment, desired_coverage):
     k_covered_points = 0
     active_sensors = 0
     total_coverage = 0
@@ -313,6 +423,54 @@ p.add_reporter(stats)
 
 winner = p.run(eval_genomes, 300)
 
+
+def test_connectivity():
+    environment = Environment(100, 100)
+    
+    sensor1 = Sensor(10, 10, 30, 30)
+    sensor2 = Sensor(30, 30, 30, 30)
+    sensor3 = Sensor(50, 50, 30, 30)
+    sensor4 = Sensor(13, 19, 30, 30)
+    sensor5 = Sensor(31, 39, 30, 30)
+    sensor6 = Sensor(20, 20, 30, 30)
+
+    sensor1.active = True
+    sensor2.active = True
+    sensor3.active = True
+    sensor4.active = True
+    sensor5.active = True
+    sensor6.active = True
+
+    environment.sensor_list.append(sensor1)
+    environment.sensor_list.append(sensor2)
+    environment.sensor_list.append(sensor3)
+    environment.sensor_list.append(sensor4)
+    environment.sensor_list.append(sensor5)
+    environment.sensor_list.append(sensor6)
+    
+    environment.add_sensor(sensor1)
+    environment.add_sensor(sensor2)
+    environment.add_sensor(sensor3)
+    environment.add_sensor(sensor4)
+    environment.add_sensor(sensor5)
+    environment.add_sensor(sensor6)
+
+    plt.imshow(environment.grid)
+    plt.show()
+    
+    connectivity_score = calculate_connectivity_score(environment.sensor_list, com_range=30)
+    assert connectivity_score == 1.0, connectivity_score
+    
+    sensor1.active = False
+    sensor2.active = False
+    sensor3.active = False
+    sensor4.active = False
+    sensor5.active = False
+    sensor6.active = False
+
+    connectivity_score = calculate_connectivity_score(environment.sensor_list, com_range=30)
+    assert connectivity_score == 0.0, connectivity_score
+ 
 
 def main():
     pass
