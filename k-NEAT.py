@@ -22,7 +22,6 @@ class Sensor:
         self.y += dy
 
     def is_point_covered(self, px, py):
-        # check if a point is in sensors sensing range
         distance = ((self.x - px)**2 + (self.y - py)**2)**0.5
 
         return distance <= self.sensing_range
@@ -49,7 +48,6 @@ class Environment:
 
 
 # intialize scenario
-# only called once
 def init_scenario(num_sensors, sensing_range, com_range, desired_coverage, width, height):
     scenario = Environment(width, height)
     sensor_positions = []
@@ -72,20 +70,8 @@ def init_scenario(num_sensors, sensing_range, com_range, desired_coverage, width
     
 
 def control_sensor(sensor, outputs):
-    # use first two outputs of the neural network to control the sensor's movement
-    #dx, dy = outputs[:2]
-    #sensor.move(dx, dy)
-    # displacement = outputs[1]
-    # sensor.move(displacement//2, displacement//2)
-
-    # # use third output to turn sensor on/off
-    # active_output = 1 / (1 + np.exp(-outputs[0]))
-    # sensor.active = active_output > 0.5
-    # sensor.move(random.randint(1, 20), random.randint(1, 20))
-    # sensor.active = random.randint(0, 1) == 1
     dx, dy = outputs[:2]
     sensor.move(dx, dy)
-    
     sensor.active = outputs[2] > 0.5
 
 
@@ -102,12 +88,11 @@ def local_coverage(environment, sensor, k):
 
     return total_coverage
 
+
 def local_coverage2(environment, sensor, k):
     total_coverage = 0
-    closest_distance = float('inf')
     lowest_coverage = float('inf')
     lowest_coverage_point = (0,0)
-    closest_point = (0, 0)
 
     for i in range(int(max(0, sensor.y - sensor.sensing_range)), int(min(environment.height, sensor.y + sensor.sensing_range))):
             for j in range(int(max(0, sensor.x - sensor.sensing_range)), int(min(environment.width, sensor.x + sensor.sensing_range))):
@@ -117,7 +102,6 @@ def local_coverage2(environment, sensor, k):
                     else:
                         if environment.grid[i][j] < lowest_coverage:
                             lowest_coverage = environment.grid[i][j]
-                            closest_point = (j, i)
 
                         total_coverage += environment.grid[i][j]
 
@@ -139,6 +123,7 @@ def global_coverage(environment, k):
                 total_coverage += environment.grid[row][col]
     
     return total_coverage
+
 
 def input_coverage(environment, sensor, k):
     local_coverage = 0
@@ -235,7 +220,7 @@ def calculate_connectivity_score(sensors, com_range):
     # intialize graph
     visited = {sensor: False for sensor in active_sensors}
     
-    # dfs
+    # DFS
     def dfs(sensor):
         stack = [sensor]
         while stack:
@@ -246,13 +231,13 @@ def calculate_connectivity_score(sensors, com_range):
                     if not visited[neighbor]:
                         stack.append(neighbor)
     
-    # run DFS 
+    # run DFS
     dfs(active_sensors[0])
     
     connected_sensors = sum(1 for sensor in active_sensors if visited[sensor])
-    #connectivity_score = connected_sensors / num_active_sensors
+    connectivity_score = connected_sensors / num_active_sensors
     
-    return connected_sensors
+    return connectivity_score
 
 
 
@@ -309,12 +294,6 @@ def eval_genomes(genomes, config):
 
             # do changes to current environment
             for sensor in new_environment.sensor_list:
-                #closest_uncovered_point = find_closest_uncovered_point(sensor, environment, k)
-                # coverage_inputs = input_coverage(environment, sensor, k)
-                # inputs = (sensor.x, sensor.y, coverage_inputs[0], coverage_inputs[1], 
-                #             coverage_inputs[2][0], coverage_inputs[2][1], num_com_neighbors(environment, sensor))
-                
-                # inputs = (sensor.x, sensor.y, local_coverage(environment, sensor, k), num_com_neighbors(environment, sensor))
                 coverage_input = local_coverage2(environment, sensor, k)
                 inputs = (sensor.x, sensor.y, coverage_input[0], coverage_input[1], coverage_input[2], num_com_neighbors(environment, sensor))
                 outputs = net.activate(inputs)
@@ -337,36 +316,51 @@ def eval_genomes(genomes, config):
 
 
 def calculate_fitness(sensors, environment, desired_coverage):
-
-    # active_sensors = sum(1 for sensor in sensors if sensor.active)
-    # total_coverage = sum(min(desired_coverage, environment.grid[row][col]) for row in range(environment.height) for col in range(environment.width))
-    # k_covered_points = sum(1 for row in range(environment.height) for col in range(environment.width) if environment.grid[row][col] >= desired_coverage)
-
     k_covered_points = 0
     active_sensors = 0
     total_coverage = 0
+    inactive_sensors = 0
 
-    # calculate total k-coverage
+    # calculate total k-coverage and coverage
     for row in range(environment.height):
         for col in range(environment.width):
-            #if environment.grid[row][col] >= desired_coverage:
-                #k_covered_points += 1
             if environment.grid[row][col] >= desired_coverage:
                 k_covered_points += 1
-                total_coverage += desired_coverage
+                total_coverage += 1
             else:
-                total_coverage += environment.grid[row][col]
+                if environment.grid[row][col] > 0:
+                    #total_coverage += environment.grid[row][col]
+                    total_coverage += 1
     
     connectivity_score = calculate_connectivity_score(sensors, sensors[0].com_range)
 
-    # Prioritize based on weights
+    k_coverage_rate = k_covered_points / (environment.height * environment.width)
+    coverage_rate = total_coverage / (environment.height * environment.width)
+
+
+    for sensor in sensors:
+        if not sensor.active:
+            inactive_sensors += 1
+        else:
+            active_sensors +=1
+    
+    inactivity = inactive_sensors / len(sensors)
+
+    if connectivity_score == 1.0:
+        connectivity_score * 10
+    if k_coverage_rate == 1.0:
+        k_coverage_rate * 10
+    if coverage_rate == 1.0:
+        coverage_rate * 10
+
     fitness_score = (
-        connectivity_score * 1000 +
-        k_covered_points * 100 +
-        total_coverage * 10 -
-        active_sensors * 1
+        connectivity_score * 0.045 +
+        k_coverage_rate * 0.024 +
+        coverage_rate * 0.03 +
+        inactivity * 0.01
     )
-    print(connectivity_score, k_covered_points, total_coverage, active_sensors, fitness_score)
+
+    print(connectivity_score, k_coverage_rate, coverage_rate, active_sensors, fitness_score)
     return fitness_score
 
 def calculate_fitness_old(sensors, environment, desired_coverage):
@@ -384,120 +378,33 @@ def calculate_fitness_old(sensors, environment, desired_coverage):
             else:
                 total_coverage += environment.grid[row][col]
     
-    # calulate # of active sensors
+    # calulate number of active sensors
     for sensor in sensors:
         if sensor.active:
             active_sensors += 1
     
-    # return fitness score
-    #return k_covered_points - active_sensors*100
-    #print((total_coverage, active_sensors))
     if total_coverage < 5000:
         print(active_sensors, total_coverage, -100)
         return -100
     else:
         print(active_sensors, total_coverage, total_coverage - active_sensors*20)
         return total_coverage - active_sensors*20
-    # print(active_sensors, total_coverage, total_coverage - active_sensors*50)
-    # return total_coverage - active_sensors*50
-
-
-# environment = init_scenario(10, 10, 20, 2, 100, 100)
-# sensor = Sensor(3, 4, 20, 40)
-# environment.add_sensor(sensor)
-# plt.imshow(environment.grid)
-# plt.show()
-
-local_dir = os.path.dirname(__file__)
-config_path = os.path.join(local_dir, 'config-feedforward.txt')
-
-config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
-                         neat.DefaultSpeciesSet, neat.DefaultStagnation,
-                         config_path)
-
-p = neat.Population(config)
-
-p.add_reporter(neat.StdOutReporter(True))
-stats = neat.StatisticsReporter()
-p.add_reporter(stats)
-
-winner = p.run(eval_genomes, 300)
-
-
-def test_connectivity():
-    environment = Environment(100, 100)
-    
-    sensor1 = Sensor(10, 10, 30, 30)
-    sensor2 = Sensor(30, 30, 30, 30)
-    sensor3 = Sensor(50, 50, 30, 30)
-    sensor4 = Sensor(13, 19, 30, 30)
-    sensor5 = Sensor(31, 39, 30, 30)
-    sensor6 = Sensor(20, 20, 30, 30)
-
-    sensor1.active = True
-    sensor2.active = True
-    sensor3.active = True
-    sensor4.active = True
-    sensor5.active = True
-    sensor6.active = True
-
-    environment.sensor_list.append(sensor1)
-    environment.sensor_list.append(sensor2)
-    environment.sensor_list.append(sensor3)
-    environment.sensor_list.append(sensor4)
-    environment.sensor_list.append(sensor5)
-    environment.sensor_list.append(sensor6)
-    
-    environment.add_sensor(sensor1)
-    environment.add_sensor(sensor2)
-    environment.add_sensor(sensor3)
-    environment.add_sensor(sensor4)
-    environment.add_sensor(sensor5)
-    environment.add_sensor(sensor6)
-
-    plt.imshow(environment.grid)
-    plt.show()
-    
-    connectivity_score = calculate_connectivity_score(environment.sensor_list, com_range=30)
-    assert connectivity_score == 1.0, connectivity_score
-    
-    sensor1.active = False
-    sensor2.active = False
-    sensor3.active = False
-    sensor4.active = False
-    sensor5.active = False
-    sensor6.active = False
-
-    connectivity_score = calculate_connectivity_score(environment.sensor_list, com_range=30)
-    assert connectivity_score == 0.0, connectivity_score
- 
 
 def main():
-    pass
-    #                           SENSOR MOVEMENT TEST
-    # sensor = Sensor(10, 10, 20)
-    # sensor.move(5, 0)
-    # if sensor.is_point_covered(15, 15):
-    #     print("The point is covered by the sensor.")
-    # else:
-    #     print("The point is not covered by the sensor.")
+    local_dir = os.path.dirname(__file__)
+    config_path = os.path.join(local_dir, 'config-feedforward.txt')
+
+    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction,
+                            neat.DefaultSpeciesSet, neat.DefaultStagnation,
+                            config_path)
+
+    p = neat.Population(config)
+
+    p.add_reporter(neat.StdOutReporter(True))
+    stats = neat.StatisticsReporter()
+    p.add_reporter(stats)
+
+    winner = p.run(eval_genomes, 300)
 
 
-    #                           ENVIRONMENT TEST
-    # environment = Environment(200, 200)
-    # sensor = Sensor(0, 0, 20)
-    # environment.add_sensor(sensor)
-    # print(environment.grid)
-
-
-    #                       MATPLOTLIB TEST
-    # environment = Environment(200, 200)
-    # sensor = Sensor(3, 3, 20)
-    # environment.add_sensor(sensor)
-    # plt.imshow(environment.grid)
-    # plt.show()
-
-
-
-
-#main()
+main()
