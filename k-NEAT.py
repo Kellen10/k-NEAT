@@ -283,27 +283,20 @@ def eval_genomes(genomes, config):
         # run neural network
         net = neat.nn.FeedForwardNetwork.create(genome, config)
 
-        for _ in range(50):
+        # do changes to current environment
+        for sensor in environment.sensor_list:
+            nn_inputs = input_coverage(environment, sensor, k)
+            inputs = (sensor.x, sensor.y, 
+                      nn_inputs[0], nn_inputs[1], nn_inputs[2][0], nn_inputs[2][1], 
+                      num_com_neighbors(environment, sensor))
+            outputs = net.activate(inputs)
+            control_sensor(sensor, outputs)
 
-            new_environment = Environment(BEST_SCENARIO.height, BEST_SCENARIO.width)
-
-            for sensor in environment.sensor_list:
-                new_sensor = Sensor(sensor.x, sensor.y, sensor.sensing_range, sensor.com_range)
-                new_sensor.active = sensor.active
-                new_environment.sensor_list.append(new_sensor)
-
-            # do changes to current environment
-            for sensor in new_environment.sensor_list:
-                coverage_input = local_coverage2(environment, sensor, k)
-                inputs = (sensor.x, sensor.y, coverage_input[0], coverage_input[1], coverage_input[2], num_com_neighbors(environment, sensor))
-                outputs = net.activate(inputs)
-                control_sensor(sensor, outputs)
-
-                if sensor.active:
-                    new_environment.add_sensor(sensor)
+            if sensor.active:
+                environment.add_sensor(sensor)
 
         # compare fitness of current to best current
-        genome.fitness = calculate_fitness(new_environment.sensor_list, new_environment, k)
+        genome.fitness = calculate_fitness(environment.sensor_list, environment, k)
 
         if genome.fitness > current_best_fitness:
             current_best_scenario = environment
@@ -347,11 +340,11 @@ def calculate_fitness(sensors, environment, desired_coverage):
     inactivity = inactive_sensors / len(sensors)
 
     if connectivity_score == 1.0:
-        connectivity_score * 10
+        connectivity_score *= 10
     if k_coverage_rate == 1.0:
-        k_coverage_rate * 10
+        k_coverage_rate *= 10
     if coverage_rate == 1.0:
-        coverage_rate * 10
+        coverage_rate *= 10
 
     fitness_score = (
         connectivity_score * 0.045 +
@@ -389,6 +382,7 @@ def calculate_fitness_old(sensors, environment, desired_coverage):
     else:
         print(active_sensors, total_coverage, total_coverage - active_sensors*20)
         return total_coverage - active_sensors*20
+
 
 def main():
     local_dir = os.path.dirname(__file__)
