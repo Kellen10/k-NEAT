@@ -104,7 +104,7 @@ def local_coverage(environment, sensor, k):
 def local_coverage2(environment, sensor, k):
     total_coverage = 0
     lowest_coverage = float('inf')
-    lowest_coverage_point = (0,0)
+    lowest_coverage_point = None
 
     for i in range(int(max(0, sensor.y - sensor.sensing_range)), int(min(environment.height, sensor.y + sensor.sensing_range))):
             for j in range(int(max(0, sensor.x - sensor.sensing_range)), int(min(environment.width, sensor.x + sensor.sensing_range))):
@@ -118,7 +118,7 @@ def local_coverage2(environment, sensor, k):
                         total_coverage += environment.grid[i][j]
 
     # if no lowest coverage point 
-    if lowest_coverage_point == (0,0):
+    if lowest_coverage_point == None:
         return (total_coverage, sensor.x, sensor.y)
     else:
         return (total_coverage, lowest_coverage_point[0], lowest_coverage_point[1])
@@ -137,6 +137,76 @@ def global_coverage(environment, k):
                 total_coverage += environment.grid[row][col]
     
     return total_coverage
+
+
+def local_coverage3(environment, sensor, k):
+    total_coverage = 0
+    lowest_coverage = float('inf')
+    lowest_coverage_point = None
+
+    for row in range(int(max(0, sensor.y - sensor.sensing_range)), int(min(environment.height, sensor.y + sensor.sensing_range))):
+            for col in range(int(max(0, sensor.x - sensor.sensing_range)), int(min(environment.width, sensor.x + sensor.sensing_range))):
+                point_coverage = environment.grid[row][col]
+
+                if sensor.is_point_covered(col, row):
+                    if point_coverage >= k:
+                        total_coverage += k
+
+                    else:
+                        if point_coverage < lowest_coverage:
+                            lowest_coverage = point_coverage
+                            lowest_coverage_point = (col, row)
+
+                        total_coverage += point_coverage
+
+    # if no lowest coverage point 
+    if lowest_coverage_point == None:
+        return (total_coverage, sensor.x, sensor.y)
+    else:
+        return (total_coverage, lowest_coverage_point[0], lowest_coverage_point[1])
+
+
+# k-coverage inputs into neural network. Finds gloabl coverage,
+# local coverage, and closest point with the lowest coverage
+def input_coverage2(environment, sensor, k):
+    local_coverage = 0
+    global_coverage = 0
+    closest_distance = float('inf')
+    closest_point = None
+    min_point_coverage = float('inf')
+
+    for row in range(environment.height):
+        for col in range(environment.width):
+            point_coverage = environment.grid[row][col]
+            if point_coverage >= k:
+                global_coverage += k
+                if sensor.is_point_covered(col, row):
+                    local_coverage += k
+            else:
+                global_coverage += point_coverage
+
+                if sensor.is_point_covered(col, row):
+                    local_coverage += point_coverage
+
+                distance = math.sqrt((row - sensor.y)**2) + math.sqrt((col - sensor.x)**2)
+
+                # if point is equal to min covered point
+                if point_coverage == min_point_coverage:
+                    # if this point is closer to sensor then min covered point
+                    if distance < closest_distance:
+                        closest_distance = distance
+                        closest_point = (col, row)
+                # if point is less than min covered point
+                elif point_coverage == min_point_coverage:
+                    closest_distance = distance
+                    closest_point = (col, row)
+
+
+    # if all points in sensors range k-covered return its own position
+    if closest_point == None:
+        closest_point = (sensor.x, sensor.y)
+                
+    return (local_coverage, global_coverage, closest_point)
 
 
 # k-coverage inputs into neural network. Finds gloabl coverage,
@@ -280,16 +350,18 @@ def eval_genomes(genomes, config):
     global BEST_FITNESS_LIST
     global AVERAGE_FITNESS_LIST
     fitness_list = []
+
     k = 2
+    scenario_dimensions = (50, 50)
 
     current_best_fitness = float('-inf')
     sensor_positions = []
 
     # if there is no univesal best scenario, make one
     if BEST_SCENARIO == None:
-        BEST_SCENARIO = Environment(50, 50)
-        current_best_scenario = Environment(50, 50)
-        environment = Environment(50, 50)
+        BEST_SCENARIO = Environment(scenario_dimensions[0], scenario_dimensions[1])
+        current_best_scenario = Environment(scenario_dimensions[0], scenario_dimensions[1])
+        environment = Environment(scenario_dimensions[0], scenario_dimensions[1])
 
         # populate universal best
         for _ in range(100):
@@ -321,11 +393,12 @@ def eval_genomes(genomes, config):
 
         # do changes to current environment
         for sensor in environment.sensor_list:
-            nn_inputs = input_coverage(environment, sensor, k)
+            nn_inputs = local_coverage3(environment, sensor, k)
             inputs = (sensor.x, sensor.y, 
-                      nn_inputs[0], nn_inputs[1], nn_inputs[2][0], nn_inputs[2][1], 
+                      nn_inputs[0], nn_inputs[1], nn_inputs[2], 
                       num_com_neighbors(environment, sensor))
             outputs = net.activate(inputs)
+
             control_sensor(sensor, outputs)
 
             if sensor.active:
@@ -429,6 +502,7 @@ def calculate_fitness_old(sensors, environment, desired_coverage):
 
 
 def main():
+    num_generations = 300
 
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'config-feedforward.txt')
@@ -443,10 +517,10 @@ def main():
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    winner = p.run(eval_genomes, 300)
+    winner = p.run(eval_genomes, num_generations)
 
     
-    gen_nums = [i for i in range(300)]
+    gen_nums = [i for i in range(num_generations)]
 
     plt.plot(gen_nums, AVERAGE_FITNESS_LIST)
     plt.title('Average Fitness Over Generations')
