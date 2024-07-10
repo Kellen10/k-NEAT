@@ -377,17 +377,17 @@ def calculate_fitness(sensors, environment, desired_coverage):
     inactivity = inactive_sensors / len(sensors)
 
     if connectivity_score == 1.0:
-        connectivity_score *= 10
+        connectivity_score *= 100
     if k_coverage_rate == 1.0:
-        k_coverage_rate *= 10
+        k_coverage_rate *= 100
     if coverage_rate == 1.0:
-        coverage_rate *= 10
+        coverage_rate *= 100
 
     fitness_score = (
-        connectivity_score * 0.045 +
-        k_coverage_rate * 0.024 +
-        coverage_rate * 0.03 +
-        inactivity * 0.01
+        connectivity_score * 0.33 +
+        k_coverage_rate * 0.35 +
+        coverage_rate * 0.31 +
+        inactivity * 1
     )
 
     print(connectivity_score, k_coverage_rate, coverage_rate, active_sensors, fitness_score)
