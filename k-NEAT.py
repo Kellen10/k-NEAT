@@ -5,9 +5,12 @@ import numpy as np
 import os
 import math
 
+
 BEST_SCENARIO = None
 BEST_FITNESS = float('-inf')
+BEST_FITNESS_LIST = []
 
+# sensor class
 class Sensor:
     def __init__(self, x, y, sensing_range, com_range):
         self.x = x
@@ -16,22 +19,24 @@ class Sensor:
         self.com_range = com_range
         self.active = True
 
+    # moves sensor to its position + dx and dy
     def move(self, dx, dy):
         # change sensors location
         self.x += dx
         self.y += dy
 
+    # determines if a point is in sensors sensing range
     def is_point_covered(self, px, py):
         distance = ((self.x - px)**2 + (self.y - py)**2)**0.5
-
         return distance <= self.sensing_range
 
+    # determines if a sensor is in sensors communication range
     def is_neighbor(self, other_sensor_x, other_sensor_y):
         distance = ((self.x - other_sensor_x)**2 + (self.y - other_sensor_y)**2)**0.5
-
         return distance <= self.com_range
 
 
+#environment class
 class Environment:
     def __init__(self, width, height):
         self.width = width
@@ -39,6 +44,7 @@ class Environment:
         self.grid = np.zeros((height, width))
         self.sensor_list = []
 
+    # adds sensor to environment
     def add_sensor(self, sensor):
         # increment the value of the grid cells within a sensors sensing range
         for i in range(int(max(0, sensor.y - sensor.sensing_range)), int(min(self.height, sensor.y + sensor.sensing_range))):
@@ -67,14 +73,17 @@ def init_scenario(num_sensors, sensing_range, com_range, desired_coverage, width
         scenario.sensor_list.append(Sensor(x, y, sensing_range, com_range))
 
     return scenario
-    
 
+
+# control sensor based on outputs from neural network
 def control_sensor(sensor, outputs):
     dx, dy = outputs[:2]
     sensor.move(dx, dy)
     sensor.active = outputs[2] > 0.5
 
 
+# return the local coverage inside of a sensors sensing radius.
+# If coverage is more than k, coverage will just be k
 def local_coverage(environment, sensor, k):
     total_coverage = 0
 
@@ -89,6 +98,8 @@ def local_coverage(environment, sensor, k):
     return total_coverage
 
 
+# Same as local_coverage except returns the position of the 
+# closest point that doesn't have k-coverage
 def local_coverage2(environment, sensor, k):
     total_coverage = 0
     lowest_coverage = float('inf')
@@ -112,6 +123,8 @@ def local_coverage2(environment, sensor, k):
         return (total_coverage, lowest_coverage_point[0], lowest_coverage_point[1])
     
 
+# finds the global coverage of the environment
+# if greater than k then point is just k
 def global_coverage(environment, k):
     total_coverage = 0
 
@@ -125,11 +138,14 @@ def global_coverage(environment, k):
     return total_coverage
 
 
+# k-coverage inputs into neural network. Finds gloabl coverage,
+# local coverage, and the closest point in sensors sensing range
+# that isn't k-covered
 def input_coverage(environment, sensor, k):
     local_coverage = 0
     global_coverage = 0
     closest_distance = float('inf')
-    closest_point = (0, 0)
+    closest_point = None
 
     for row in range(environment.height):
         for col in range(environment.width):
@@ -147,13 +163,18 @@ def input_coverage(environment, sensor, k):
                 if distance < closest_distance:
                     closest_distance = distance
                     closest_point = (col, row)
+
+    # if all points in sensors range k-covered return its own position
+    if closest_point == None:
+        closest_point = (sensor.x, sensor.y)
                 
     return (local_coverage, global_coverage, closest_point)
 
 
+# finds closest uncovered point in sensors sensing range
 def find_closest_uncovered_point(sensor, environment, k):
     closest_distance = float('inf')
-    closest_point = (0, 0)
+    closest_point = None
 
     for y in range(environment.height):
         for x in range(environment.width):
@@ -163,9 +184,14 @@ def find_closest_uncovered_point(sensor, environment, k):
                     closest_distance = distance
                     closest_point = (x, y)
 
+     # if all points in sensors range k-covered return its own position
+    if closest_point == None:
+        closest_point = (sensor.x, sensor.y)
+
     return closest_point
 
 
+# finds distance of sensors closest communication neighbor
 def closest_com_neighbor(environment, sensor):
     #closest_location = ()
     min_distance = float('inf')
@@ -180,6 +206,8 @@ def closest_com_neighbor(environment, sensor):
     return min_distance
 
 
+# finds number of sensors in sensor's communication range.
+# aka finds sensors communication neighbors
 def num_com_neighbors(environment, sensor):
     total_com_neighbors = 0
 
@@ -191,6 +219,10 @@ def num_com_neighbors(environment, sensor):
     return total_com_neighbors
 
 
+# calculates connectivity. Divides number of connected 
+# components by the number of active sensors to calculate
+# a connectivity score. Best score is when active sensors
+# = # of connected sensors, which will be 1.0
 def calculate_connectivity_score(sensors, com_range):
     num_active_sensors = 0
     active_sensors = []
@@ -217,7 +249,6 @@ def calculate_connectivity_score(sensors, com_range):
                 graph[sensor].append(other_sensor)
                 graph[other_sensor].append(sensor)
     
-    # intialize graph
     visited = {sensor: False for sensor in active_sensors}
     
     # DFS
@@ -240,10 +271,12 @@ def calculate_connectivity_score(sensors, com_range):
     return connectivity_score
 
 
-
+# creates scenario, runs genomes on scenario, finds best genomes
+# and best scenario, repeats the process until threshold/generation limit is met
 def eval_genomes(genomes, config):
     global BEST_FITNESS
     global BEST_SCENARIO
+    global BEST_FITNESS_LIST
     k = 2
 
     current_best_fitness = float('-inf')
@@ -306,8 +339,12 @@ def eval_genomes(genomes, config):
     if current_best_fitness > BEST_FITNESS:
         BEST_FITNESS = current_best_fitness
         BEST_SCENARIO = current_best_scenario
+    
+    BEST_FITNESS_LIST.append(BEST_FITNESS)
 
 
+# caclulates fitness of scenarios after 
+# neural network made changes to them
 def calculate_fitness(sensors, environment, desired_coverage):
     k_covered_points = 0
     active_sensors = 0
@@ -356,6 +393,7 @@ def calculate_fitness(sensors, environment, desired_coverage):
     print(connectivity_score, k_coverage_rate, coverage_rate, active_sensors, fitness_score)
     return fitness_score
 
+# old fitness function. Not in use
 def calculate_fitness_old(sensors, environment, desired_coverage):
     k_covered_points = 0
     active_sensors = 0
@@ -385,6 +423,7 @@ def calculate_fitness_old(sensors, environment, desired_coverage):
 
 
 def main():
+
     local_dir = os.path.dirname(__file__)
     config_path = os.path.join(local_dir, 'config-feedforward.txt')
 
@@ -399,6 +438,14 @@ def main():
     p.add_reporter(stats)
 
     winner = p.run(eval_genomes, 300)
+
+    gen_nums = [i for i in range(300)]
+    plt.plot(gen_nums, BEST_FITNESS_LIST)
+    
+    plt.title('Best Fitness Over Generations')
+    plt.xlabel('Generation')
+    plt.ylabel('Best Fitness Score')
+    plt.show()
 
 
 main()
