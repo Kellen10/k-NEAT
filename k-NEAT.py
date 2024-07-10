@@ -9,6 +9,7 @@ import math
 BEST_SCENARIO = None
 BEST_FITNESS = float('-inf')
 BEST_FITNESS_LIST = []
+AVERAGE_FITNESS_LIST = []
 
 # sensor class
 class Sensor:
@@ -277,6 +278,8 @@ def eval_genomes(genomes, config):
     global BEST_FITNESS
     global BEST_SCENARIO
     global BEST_FITNESS_LIST
+    global AVERAGE_FITNESS_LIST
+    fitness_list = []
     k = 2
 
     current_best_fitness = float('-inf')
@@ -331,6 +334,8 @@ def eval_genomes(genomes, config):
         # compare fitness of current to best current
         genome.fitness = calculate_fitness(environment.sensor_list, environment, k)
 
+        fitness_list.append(genome.fitness)
+
         if genome.fitness > current_best_fitness:
             current_best_scenario = environment
             current_best_fitness = genome.fitness
@@ -341,6 +346,7 @@ def eval_genomes(genomes, config):
         BEST_SCENARIO = current_best_scenario
     
     BEST_FITNESS_LIST.append(BEST_FITNESS)
+    AVERAGE_FITNESS_LIST.append(sum(fitness_list)/100)
 
 
 # caclulates fitness of scenarios after 
@@ -439,7 +445,15 @@ def main():
 
     winner = p.run(eval_genomes, 300)
 
+    
     gen_nums = [i for i in range(300)]
+
+    plt.plot(gen_nums, AVERAGE_FITNESS_LIST)
+    plt.title('Average Fitness Over Generations')
+    plt.xlabel('Generation')
+    plt.ylabel('Average Fitness Score')
+    plt.show()
+
     plt.plot(gen_nums, BEST_FITNESS_LIST)
     
     plt.title('Best Fitness Over Generations')
