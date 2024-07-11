@@ -45,6 +45,7 @@ class Environment:
         self.grid = np.zeros((height, width))
         self.sensor_list = []
 
+
     # adds sensor to environment
     def add_sensor(self, sensor):
         # increment the value of the grid cells within a sensors sensing range
@@ -201,7 +202,6 @@ def input_coverage2(environment, sensor, k):
                     closest_distance = distance
                     closest_point = (col, row)
 
-
     # if all points in sensors range k-covered return its own position
     if closest_point == None:
         closest_point = (sensor.x, sensor.y)
@@ -344,6 +344,94 @@ def calculate_connectivity_score(sensors, com_range):
 
 # creates scenario, runs genomes on scenario, finds best genomes
 # and best scenario, repeats the process until threshold/generation limit is met
+def eval_genomes2(genomes, config):
+    global BEST_FITNESS
+    global BEST_SCENARIO
+    global BEST_FITNESS_LIST
+    global AVERAGE_FITNESS_LIST
+    fitness_list = []
+
+    k = 2
+    scenario_dimensions = (50, 50)
+
+    current_best_fitness = float('-inf')
+    sensor_positions = []
+
+    environment = Environment(scenario_dimensions[0], scenario_dimensions[1])
+
+    # populate universal best
+    for _ in range(100):
+        x = random.randint(0, scenario_dimensions[0])
+        y = random.randint(0, scenario_dimensions[1])
+        if (x,y) in sensor_positions:
+            while (x,y) in sensor_positions:
+                x = random.randint(0, environment.width)
+                y = random.randint(0, environment.height)
+            sensor_positions.append((x,y))
+        else:
+            sensor_positions.append((x,y))
+
+        sensing_range = 10
+        com_range = 20
+        environment.sensor_list.append(Sensor(x, y, sensing_range, com_range))
+
+
+    for genome_id, genome in genomes:
+        # copy the universal best solution to an environment for the neural network
+        g_environment = Environment(environment.height, environment.width)
+        for sensor in environment.sensor_list:
+            new_sensor = Sensor(sensor.x, sensor.y, sensor.sensing_range, sensor.com_range)
+            new_sensor.active = sensor.active
+            g_environment.sensor_list.append(new_sensor)
+        
+        # run neural network
+        net = neat.nn.FeedForwardNetwork.create(genome, config)
+
+        # do changes to current environment
+        for sensor in g_environment.sensor_list:
+            nn_inputs = local_coverage3(g_environment, sensor, k)
+            inputs = (sensor.x, sensor.y, 
+                      nn_inputs[0], nn_inputs[1], nn_inputs[2], 
+                      num_com_neighbors(g_environment, sensor))
+            outputs = net.activate(inputs)
+
+            control_sensor(sensor, outputs)
+
+            if sensor.active:
+                g_environment.add_sensor(sensor)
+
+        # compare fitness of current to best current
+        genome.fitness = calculate_fitness(g_environment.sensor_list, g_environment, k)
+
+        fitness_list.append(genome.fitness)
+
+        if genome.fitness > current_best_fitness:
+            #current_best_scenario = environment
+            current_best_fitness = genome.fitness
+
+    # at the end of iterating through genomes compare best current to universal best
+    if current_best_fitness > BEST_FITNESS:
+        BEST_FITNESS = current_best_fitness
+        #BEST_SCENARIO = current_best_scenario
+    
+    BEST_FITNESS_LIST.append(BEST_FITNESS)
+    AVERAGE_FITNESS_LIST.append(sum(fitness_list)/100)
+
+    # visualize_best_scenario = Environment(BEST_SCENARIO.height, BEST_SCENARIO.width)
+    
+    # for sensor in BEST_SCENARIO.sensor_list:
+    #     if sensor.active:
+    #         visualize_best_scenario.add_sensor(sensor)
+    
+    # plt.plot
+    # plt.imshow(visualize_best_scenario.grid)
+    # plt.colorbar()
+    # plt.title('Best scenario')
+    # plt.xlabel('x')
+    # plt.ylabel('y')
+    # plt.show()
+
+
 def eval_genomes(genomes, config):
     global BEST_FITNESS
     global BEST_SCENARIO
@@ -380,7 +468,6 @@ def eval_genomes(genomes, config):
             BEST_SCENARIO.sensor_list.append(Sensor(x, y, sensing_range, com_range))
 
     for genome_id, genome in genomes:
-
         # copy the universal best solution to an environment for the neural network
         environment = Environment(BEST_SCENARIO.height, BEST_SCENARIO.width)
         for sensor in BEST_SCENARIO.sensor_list:
@@ -420,6 +507,20 @@ def eval_genomes(genomes, config):
     
     BEST_FITNESS_LIST.append(BEST_FITNESS)
     AVERAGE_FITNESS_LIST.append(sum(fitness_list)/100)
+
+    # visualize_best_scenario = Environment(BEST_SCENARIO.height, BEST_SCENARIO.width)
+    
+    # for sensor in BEST_SCENARIO.sensor_list:
+    #     if sensor.active:
+    #         visualize_best_scenario.add_sensor(sensor)
+    
+    # plt.plot
+    # plt.imshow(visualize_best_scenario.grid)
+    # plt.colorbar()
+    # plt.title('Best scenario')
+    # plt.xlabel('x')
+    # plt.ylabel('y')
+    # plt.show()
 
 
 # caclulates fitness of scenarios after 
@@ -517,7 +618,7 @@ def main():
     stats = neat.StatisticsReporter()
     p.add_reporter(stats)
 
-    winner = p.run(eval_genomes, num_generations)
+    winner = p.run(eval_genomes2, num_generations)
 
     
     gen_nums = [i for i in range(num_generations)]
